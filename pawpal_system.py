@@ -3,8 +3,10 @@
 All times are stored as minutes since midnight (e.g. 08:00 -> 480).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from enum import Enum
+from itertools import combinations
 from typing import List, Optional, Tuple
 
 COMMON_TASK_TYPES = ["feeding", "grooming", "medication", "play"]
@@ -13,6 +15,15 @@ COMMON_TASK_TYPES = ["feeding", "grooming", "medication", "play"]
 def format_time(minutes: int) -> str:
     """Convert minutes since midnight to an HH:MM string."""
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def parse_time(text: str) -> int:
+    """Convert an "HH:MM" string to minutes since midnight (inverse of format_time).
+
+    Example: parse_time("08:30") -> 510. Raises ValueError on malformed input.
+    """
+    hours, minutes = text.split(":")
+    return int(hours) * 60 + int(minutes)
 
 
 class Priority(Enum):
@@ -32,10 +43,24 @@ class Task:
     preferred_time: Optional[int] = None  # minutes since midnight; None = no preference
     frequency: str = "once"  # "once", "daily", or "weekly"
     is_completed: bool = False
+    due_date: Optional[date] = None  # None = today; used to date recurring tasks
 
-    def mark_complete(self) -> None:
-        """Mark this task as done."""
+    def mark_complete(self) -> Optional["Task"]:
+        """Mark this task as done and build its next occurrence if it recurs.
+
+        A "daily" task comes back due today + 1 day and a "weekly" task today + 7
+        days (via timedelta, so month and year rollovers are handled). The copy is
+        a fresh, not-completed Task with every other field unchanged. A "once"
+        task returns None. This method does not add the copy to any pet; use
+        Pet.complete_task or Scheduler.mark_task_complete for that.
+        """
         self.is_completed = True
+        step = {"daily": 1, "weekly": 7}.get(self.frequency)
+        if step is None:
+            return None
+        return replace(
+            self, is_completed=False, due_date=date.today() + timedelta(days=step)
+        )
 
 
 @dataclass
@@ -65,6 +90,17 @@ class Pet:
     def remove_task(self, task: Task) -> None:
         """Remove a task from this pet."""
         self.tasks.remove(task)
+
+    def complete_task(self, task: Task) -> Optional[Task]:
+        """Complete a task and, if it recurs, add its next occurrence to this pet.
+
+        The finished task stays in the list, so a recurring task leaves one done
+        copy and one pending copy. Returns the new Task, or None for a "once" task.
+        """
+        following = task.mark_complete()
+        if following is not None:
+            self.tasks.append(following)
+        return following
 
 
 @dataclass
@@ -129,6 +165,71 @@ class Owner:
     def get_all_tasks(self) -> List[Tuple[Pet, Task]]:
         """Return every (pet, task) pair across all of the owner's pets."""
         return [(pet, task) for pet in self.pets for task in pet.tasks]
+
+
+def sort_by_time(pairs: List[Tuple[Pet, Task]]) -> List[Tuple[Pet, Task]]:
+    """Order (pet, task) pairs by preferred time, earliest first.
+
+    The key is (no preference?, minutes), so tasks with no preferred time sort
+    after every timed task. Sorting is stable: ties keep their original order.
+    Returns a new list; the input is not modified. O(n log n).
+    """
+    return sorted(
+        pairs,
+        key=lambda pt: (pt[1].preferred_time is None, pt[1].preferred_time or 0),
+    )
+
+
+def filter_tasks(
+    owner: Owner, pet_name: Optional[str] = None, completed: Optional[bool] = None
+) -> List[Tuple[Pet, Task]]:
+    """Return the owner's (pet, task) pairs, optionally limited by pet name and status.
+
+    Args:
+        pet_name: keep only this pet's tasks; None keeps every pet.
+        completed: True keeps finished tasks, False keeps pending ones,
+            None keeps both.
+
+    Filters combine (both must match). Single O(n) pass.
+    """
+    return [
+        (pet, task)
+        for pet, task in owner.get_all_tasks()
+        if (pet_name is None or pet.name == pet_name)
+        and (completed is None or task.is_completed == completed)
+    ]
+
+
+def find_conflicts(pairs: List[Tuple[Pet, Task]]) -> List[str]:
+    """Return a warning string for each pair of pending tasks whose windows overlap.
+
+    A task's window is [preferred_time, preferred_time + duration). Two windows
+    conflict when each starts before the other ends, so identical start times
+    conflict, partial overlaps conflict, and back-to-back tasks do not. Each
+    warning says whether the pair belongs to the same pet or different pets.
+
+    Completed tasks and tasks with no preferred time are ignored. This reports
+    what the owner asked for, not where the scheduler places tasks. It never
+    raises and never changes the tasks. Pairwise check, O(n^2).
+    """
+    timed = [
+        (pet, task)
+        for pet, task in pairs
+        if task.preferred_time is not None and not task.is_completed
+    ]
+    warnings = []
+    for (pet_a, a), (pet_b, b) in combinations(timed, 2):
+        end_a = a.preferred_time + a.duration_minutes
+        end_b = b.preferred_time + b.duration_minutes
+        if a.preferred_time < end_b and b.preferred_time < end_a:
+            who = "same pet" if pet_a is pet_b else "different pets"
+            warnings.append(
+                f"Conflict ({who}): {a.title} ({pet_a.name}) "
+                f"{format_time(a.preferred_time)}-{format_time(end_a)} overlaps "
+                f"{b.title} ({pet_b.name}) "
+                f"{format_time(b.preferred_time)}-{format_time(end_b)}"
+            )
+    return warnings
 
 
 @dataclass
@@ -243,6 +344,43 @@ class Scheduler:
 
         plan.scheduled.sort(key=lambda s: s.start_time)
         return plan
+
+    def sort_by_time(
+        self, pairs: Optional[List[Tuple[Pet, Task]]] = None
+    ) -> List[Tuple[Pet, Task]]:
+        """Return (pet, task) pairs ordered by preferred time, earliest first.
+
+        Sorts the given pairs, or all of the owner's tasks when none are passed.
+        Tasks with no preferred time go last. See the module-level sort_by_time.
+        """
+        return sort_by_time(self.owner.get_all_tasks() if pairs is None else pairs)
+
+    def find_conflicts(self) -> List[str]:
+        """Return a warning for each pair of the owner's pending tasks that overlap.
+
+        Lightweight by design: it returns messages instead of raising, so the
+        caller can print them and still call generate_plan. Overlap rules are
+        described in the module-level find_conflicts.
+        """
+        return find_conflicts(self.owner.get_all_tasks())
+
+    def mark_task_complete(self, pet: Pet, task: Task) -> Optional[Task]:
+        """Complete a task and return its next occurrence, or None if it doesn't recur.
+
+        A daily task is re-created due tomorrow and a weekly task due in 7 days;
+        the new task is added to the given pet. See Task.mark_complete.
+        """
+        return pet.complete_task(task)
+
+    def filter_tasks(
+        self, pet_name: Optional[str] = None, completed: Optional[bool] = None
+    ) -> List[Tuple[Pet, Task]]:
+        """Return the owner's (pet, task) pairs filtered by pet name and/or status.
+
+        pet_name=None keeps all pets; completed=None keeps done and pending
+        tasks. The result can be passed to sort_by_time. See filter_tasks.
+        """
+        return filter_tasks(self.owner, pet_name, completed)
 
     def _sort_tasks(
         self, pairs: List[Tuple[Pet, Task]]

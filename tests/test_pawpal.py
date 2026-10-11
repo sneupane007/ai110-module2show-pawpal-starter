@@ -1,4 +1,17 @@
-from pawpal_system import Dog, Priority, Task
+from datetime import date, timedelta
+
+from pawpal_system import (
+    Cat,
+    Dog,
+    Owner,
+    Priority,
+    Scheduler,
+    Task,
+    filter_tasks,
+    find_conflicts,
+    parse_time,
+    sort_by_time,
+)
 
 
 def make_task() -> Task:
@@ -21,3 +34,106 @@ def test_add_task_increases_pet_task_count():
     pet.add_task(make_task())
 
     assert len(pet.tasks) == 1
+
+
+def make_owner():
+    owner = Owner(name="Jordan")
+    mochi, luna = Dog(name="Mochi"), Cat(name="Luna")
+    owner.add_pet(mochi)
+    owner.add_pet(luna)
+    return owner, mochi, luna
+
+
+def test_parse_time():
+    assert parse_time("08:30") == 510
+
+
+def test_sort_by_time_puts_unscheduled_last():
+    owner, mochi, luna = make_owner()
+    mochi.add_task(Task("Play", "play", 20))
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("09:00")))
+    luna.add_task(Task("Feed", "feeding", 10, preferred_time=parse_time("07:00")))
+
+    titles = [t.title for _, t in sort_by_time(owner.get_all_tasks())]
+
+    assert titles == ["Feed", "Walk", "Play"]
+
+
+def test_filter_by_pet_and_status():
+    owner, mochi, luna = make_owner()
+    done = Task("Walk", "walk", 30)
+    done.mark_complete()
+    mochi.add_task(done)
+    mochi.add_task(Task("Play", "play", 20))
+    luna.add_task(Task("Feed", "feeding", 10))
+
+    assert [t.title for _, t in filter_tasks(owner, "Mochi")] == ["Walk", "Play"]
+    assert [t.title for _, t in filter_tasks(owner, completed=False)] == ["Play", "Feed"]
+    assert [t.title for _, t in filter_tasks(owner, "Luna", completed=True)] == []
+
+
+def test_daily_task_recurs_tomorrow():
+    pet = Dog(name="Mochi")
+    task = Task("Meds", "medication", 5, frequency="daily", due_date=date(2020, 1, 1))
+    pet.add_task(task)
+
+    following = pet.complete_task(task)
+
+    assert task.is_completed is True
+    assert following.due_date == date.today() + timedelta(days=1)
+    assert following.is_completed is False
+    assert following in pet.tasks
+
+
+def test_weekly_task_recurs_in_seven_days():
+    owner, mochi, _ = make_owner()
+    task = Task("Bath", "grooming", 20, frequency="weekly")
+    mochi.add_task(task)
+
+    following = Scheduler(owner).mark_task_complete(mochi, task)
+
+    assert following.due_date == date.today() + timedelta(days=7)
+    assert [t.is_completed for t in mochi.tasks] == [True, False]
+
+
+def test_one_off_task_does_not_recur():
+    pet = Dog(name="Mochi")
+    task = Task("Bath", "grooming", 20)
+    pet.add_task(task)
+
+    assert pet.complete_task(task) is None
+    assert len(pet.tasks) == 1
+
+
+def test_find_conflicts_detects_overlap_across_pets():
+    owner, mochi, luna = make_owner()
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("08:00")))
+    luna.add_task(Task("Feed", "feeding", 10, preferred_time=parse_time("08:10")))
+
+    warnings = find_conflicts(owner.get_all_tasks())
+
+    assert len(warnings) == 1
+    assert "different pets" in warnings[0]
+
+
+def test_find_conflicts_ignores_back_to_back_and_completed():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("08:00")))
+    mochi.add_task(Task("Feed", "feeding", 10, preferred_time=parse_time("08:30")))
+    skipped = Task("Play", "play", 30, preferred_time=parse_time("08:15"))
+    skipped.mark_complete()
+    mochi.add_task(skipped)
+
+    assert find_conflicts(owner.get_all_tasks()) == []
+
+
+def test_scheduler_warns_on_same_time_same_pet_without_crashing():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("08:00")))
+    mochi.add_task(Task("Training", "training", 15, preferred_time=parse_time("08:00")))
+
+    warnings = Scheduler(owner).find_conflicts()
+
+    assert len(warnings) == 1
+    assert "same pet" in warnings[0]
+    assert len(Scheduler(owner).generate_plan().scheduled) == 2

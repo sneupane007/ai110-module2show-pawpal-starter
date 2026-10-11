@@ -41,7 +41,9 @@ Yes. After turning the UML into a class skeleton, I reviewed it for missing rela
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
+The scheduler treats a task's preferred time as a soft preference and resolves overlaps by shifting, not by refusing. Tasks are placed greedily, highest priority first, each in the earliest free slot at or after its preferred time. If two tasks want overlapping times, the lower-priority one is quietly pushed later, and `find_conflicts` only returns a warning string for the overlap. It never changes the plan. The cost is that the greedy pass is not optimal: a high-priority task can take a slot that would have let two smaller tasks both keep their preferred times, and a task shifted away from its preferred time (a feeding moved from 08:10 to 08:30) may not be what the owner wanted.
 - Why is that tradeoff reasonable for this scenario?
+A pet owner's day has a handful of tasks, and a plan that always exists and explains itself is more useful than a perfect one. Medication and feeding (high priority) get their times first, and the "Why" lines and conflict warnings tell the owner exactly what moved. Finding an optimal arrangement would mean searching over orderings, which is hard to explain to the owner and not worth it at this size. Failing on a conflict would leave the owner with no schedule at all.
 
 ---
 
