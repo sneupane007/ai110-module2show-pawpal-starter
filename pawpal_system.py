@@ -1,8 +1,18 @@
-"""PawPal+ logic layer: backend classes for pets, tasks, and scheduling."""
+"""PawPal+ logic layer: backend classes for pets, tasks, and scheduling.
+
+All times are stored as minutes since midnight (e.g. 08:00 -> 480).
+"""
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List
+from typing import List, Optional, Tuple
+
+COMMON_TASK_TYPES = ["feeding", "grooming", "medication", "play"]
+
+
+def format_time(minutes: int) -> str:
+    """Convert minutes since midnight to an HH:MM string."""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 class Priority(Enum):
@@ -11,7 +21,7 @@ class Priority(Enum):
     HIGH = 3
 
 
-@dataclass
+@dataclass(eq=False)  # identity equality: two identical-looking tasks stay distinct and hashable
 class Task:
     """A single pet care activity."""
 
@@ -19,12 +29,13 @@ class Task:
     task_type: str
     duration_minutes: int
     priority: Priority = Priority.MEDIUM
-    preferred_time: str = ""
+    preferred_time: Optional[int] = None  # minutes since midnight; None = no preference
+    frequency: str = "once"  # "once", "daily", or "weekly"
     is_completed: bool = False
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
-        pass
+        self.is_completed = True
 
 
 @dataclass
@@ -37,37 +48,41 @@ class Pet:
 
     def species(self) -> str:
         """Return the species name."""
-        pass
+        return "pet"
 
     def allowed_task_types(self) -> List[str]:
         """Return the task types that make sense for this pet."""
-        pass
+        return list(COMMON_TASK_TYPES)
 
     def add_task(self, task: Task) -> None:
-        """Add a task to this pet."""
-        pass
+        """Add a task to this pet. Raises ValueError if the type isn't allowed."""
+        if task.task_type not in self.allowed_task_types():
+            raise ValueError(
+                f"{self.name} ({self.species()}) cannot have a '{task.task_type}' task"
+            )
+        self.tasks.append(task)
 
     def remove_task(self, task: Task) -> None:
         """Remove a task from this pet."""
-        pass
+        self.tasks.remove(task)
 
 
 @dataclass
 class Dog(Pet):
     def species(self) -> str:
-        pass
+        return "dog"
 
     def allowed_task_types(self) -> List[str]:
-        pass
+        return COMMON_TASK_TYPES + ["walk", "training"]
 
 
 @dataclass
 class Cat(Pet):
     def species(self) -> str:
-        pass
+        return "cat"
 
     def allowed_task_types(self) -> List[str]:
-        pass
+        return COMMON_TASK_TYPES + ["litter box"]
 
 
 @dataclass
@@ -75,10 +90,10 @@ class OtherPet(Pet):
     custom_species: str = ""
 
     def species(self) -> str:
-        pass
+        return self.custom_species or "other"
 
     def allowed_task_types(self) -> List[str]:
-        pass
+        return list(COMMON_TASK_TYPES)
 
 
 @dataclass
@@ -87,21 +102,21 @@ class Owner:
 
     name: str
     available_minutes: int = 120
-    day_start: str = "08:00"
-    day_end: str = "20:00"
+    day_start: int = 480  # 08:00
+    day_end: int = 1200  # 20:00
     pets: List[Pet] = field(default_factory=list)
 
     def add_pet(self, pet: Pet) -> None:
         """Add a pet to this owner."""
-        pass
+        self.pets.append(pet)
 
     def remove_pet(self, pet: Pet) -> None:
         """Remove a pet from this owner."""
-        pass
+        self.pets.remove(pet)
 
-    def get_all_tasks(self) -> List[Task]:
-        """Return every task across all of the owner's pets."""
-        pass
+    def get_all_tasks(self) -> List[Tuple[Pet, Task]]:
+        """Return every (pet, task) pair across all of the owner's pets."""
+        return [(pet, task) for pet in self.pets for task in pet.tasks]
 
 
 @dataclass
@@ -110,9 +125,18 @@ class ScheduledTask:
 
     task: Task
     pet: Pet
-    start_time: str
-    end_time: str
+    start_time: int  # minutes since midnight
+    end_time: int
     reason: str = ""
+
+
+@dataclass
+class SkippedTask:
+    """A task that did not make it into the plan, and why."""
+
+    task: Task
+    pet: Pet
+    reason: str
 
 
 @dataclass
@@ -120,12 +144,42 @@ class DailyPlan:
     """The scheduler's output: what was scheduled, what was skipped, and why."""
 
     scheduled: List[ScheduledTask] = field(default_factory=list)
-    skipped: List[Task] = field(default_factory=list)
+    skipped: List[SkippedTask] = field(default_factory=list)
     total_minutes: int = 0
 
-    def explain(self) -> str:
-        """Return a human-readable explanation of the plan."""
-        pass
+    def explain(self, available_minutes: Optional[int] = None) -> str:
+        """Return the plan as a readable table, with reasons and skipped tasks."""
+        rule = "-" * 50
+        lines = [
+            f" {'TIME':<13} {'TASK':<18} {'PET':<8} {'PRIORITY':<9} MIN",
+            " " + rule,
+        ]
+        for s in sorted(self.scheduled, key=lambda s: s.start_time):
+            span = f"{format_time(s.start_time)}-{format_time(s.end_time)}"
+            lines.append(
+                f" {span:<13} {s.task.title:<18} {s.pet.name:<8} "
+                f"{s.task.priority.name:<9} {s.task.duration_minutes:>3}"
+            )
+        lines.append(" " + rule)
+
+        used = f"{self.total_minutes}"
+        if available_minutes is not None:
+            used += f" of {available_minutes}"
+        lines.append(f" Scheduled: {len(self.scheduled)} tasks, {used} min used")
+
+        if self.scheduled:
+            lines.append("")
+            lines.append(" Why:")
+            for s in sorted(self.scheduled, key=lambda s: s.start_time):
+                lines.append(f"   - {s.task.title} ({s.pet.name}): {s.reason}")
+
+        if self.skipped:
+            lines.append("")
+            lines.append(f" Skipped ({len(self.skipped)}):")
+            for k in self.skipped:
+                lines.append(f"   - {k.task.title} ({k.pet.name}): {k.reason}")
+
+        return "\n".join(lines)
 
 
 class Scheduler:
@@ -135,17 +189,77 @@ class Scheduler:
         self.owner = owner
 
     def generate_plan(self) -> DailyPlan:
-        """Create a daily plan from the owner's tasks and constraints."""
-        pass
+        """Create a daily plan from the owner's tasks and constraints.
 
-    def _sort_tasks(self, tasks: List[Task]) -> List[Task]:
-        """Order tasks by priority, then preferred time."""
-        pass
+        Tasks are taken highest priority first, then by preferred time. Each is
+        placed in the earliest free slot at or after its preferred time. A task
+        that does not fit is skipped, and smaller later tasks can still fit.
+        """
+        plan = DailyPlan()
+        pending: List[Tuple[Pet, Task]] = []
 
-    def _fits_in_time(self, task: Task, minutes_left: int) -> bool:
-        """Return True if the task fits in the remaining time."""
-        pass
+        for pet, task in self.owner.get_all_tasks():
+            if task.is_completed:
+                plan.skipped.append(SkippedTask(task, pet, "already completed"))
+            elif task.task_type not in pet.allowed_task_types():
+                plan.skipped.append(
+                    SkippedTask(task, pet, f"'{task.task_type}' not valid for a {pet.species()}")
+                )
+            else:
+                pending.append((pet, task))
 
-    def _detect_conflicts(self, plan: DailyPlan) -> List[Task]:
-        """Return tasks whose scheduled times overlap."""
-        pass
+        for pet, task in self._sort_tasks(pending):
+            slot = self._place_task(task, plan)
+            if slot is None:
+                plan.skipped.append(
+                    SkippedTask(task, pet, "not enough time left in the day")
+                )
+                continue
+
+            start, end = slot
+            reason = f"{task.priority.name.lower()} priority"
+            if task.preferred_time is None:
+                reason += ", earliest open slot"
+            elif start == task.preferred_time:
+                reason += f", at preferred time {format_time(start)}"
+            else:
+                reason += f", moved from preferred {format_time(task.preferred_time)}"
+
+            plan.scheduled.append(ScheduledTask(task, pet, start, end, reason))
+            plan.total_minutes += task.duration_minutes
+
+        plan.scheduled.sort(key=lambda s: s.start_time)
+        return plan
+
+    def _sort_tasks(
+        self, pairs: List[Tuple[Pet, Task]]
+    ) -> List[Tuple[Pet, Task]]:
+        """Order (pet, task) pairs by priority (highest first), then preferred time."""
+        no_preference = 24 * 60
+        return sorted(
+            pairs,
+            key=lambda pt: (
+                -pt[1].priority.value,
+                pt[1].preferred_time if pt[1].preferred_time is not None else no_preference,
+            ),
+        )
+
+    def _place_task(self, task: Task, plan: DailyPlan) -> Optional[Tuple[int, int]]:
+        """Return (start, end) in the earliest free slot at or after the task's
+        preferred time, or None if it exceeds the time budget or the day window."""
+        if plan.total_minutes + task.duration_minutes > self.owner.available_minutes:
+            return None
+
+        start = self.owner.day_start
+        if task.preferred_time is not None:
+            start = max(start, task.preferred_time)
+
+        for s in sorted(plan.scheduled, key=lambda s: s.start_time):
+            if start + task.duration_minutes <= s.start_time:
+                break
+            start = max(start, s.end_time)
+
+        end = start + task.duration_minutes
+        if end > self.owner.day_end:
+            return None
+        return start, end
