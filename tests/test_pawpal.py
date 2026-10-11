@@ -137,3 +137,124 @@ def test_scheduler_warns_on_same_time_same_pet_without_crashing():
     assert len(warnings) == 1
     assert "same pet" in warnings[0]
     assert len(Scheduler(owner).generate_plan().scheduled) == 2
+
+
+# --- Sorting edge cases ---
+
+def test_sort_by_time_with_no_tasks_returns_empty():
+    owner, _, _ = make_owner()  # two pets, zero tasks
+
+    assert sort_by_time(owner.get_all_tasks()) == []
+
+
+def test_sort_by_time_is_stable_for_equal_times():
+    owner, mochi, luna = make_owner()
+    mochi.add_task(Task("A", "play", 10, preferred_time=parse_time("08:00")))
+    mochi.add_task(Task("B", "play", 10, preferred_time=parse_time("08:00")))
+    luna.add_task(Task("C", "feeding", 10, preferred_time=parse_time("07:00")))
+
+    titles = [t.title for _, t in sort_by_time(owner.get_all_tasks())]
+
+    assert titles == ["C", "A", "B"]
+
+
+def test_sort_by_time_treats_midnight_as_a_real_time():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Untimed", "play", 10))
+    mochi.add_task(Task("Midnight", "medication", 5, preferred_time=0))
+
+    titles = [t.title for _, t in sort_by_time(owner.get_all_tasks())]
+
+    assert titles == ["Midnight", "Untimed"]
+
+
+def test_sort_by_time_does_not_modify_input():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Late", "walk", 30, preferred_time=parse_time("18:00")))
+    mochi.add_task(Task("Early", "feeding", 10, preferred_time=parse_time("07:00")))
+    pairs = owner.get_all_tasks()
+
+    sort_by_time(pairs)
+
+    assert [t.title for _, t in pairs] == ["Late", "Early"]
+
+
+# --- Recurrence edge cases ---
+
+def test_recurring_copy_keeps_fields_but_is_a_new_pending_task():
+    pet = Dog(name="Mochi")
+    task = Task("Meds", "medication", 5, Priority.HIGH,
+                preferred_time=parse_time("09:00"), frequency="daily")
+    pet.add_task(task)
+
+    following = pet.complete_task(task)
+
+    assert following is not task
+    assert (following.title, following.priority, following.preferred_time,
+            following.frequency) == ("Meds", Priority.HIGH, 540, "daily")
+    assert following.is_completed is False
+
+
+# --- Conflict edge cases ---
+
+def test_find_conflicts_flags_identical_time_on_different_pets():
+    owner, mochi, luna = make_owner()
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("08:00")))
+    luna.add_task(Task("Feed", "feeding", 30, preferred_time=parse_time("08:00")))
+
+    warnings = find_conflicts(owner.get_all_tasks())
+
+    assert len(warnings) == 1
+    assert "different pets" in warnings[0]
+
+
+def test_find_conflicts_three_tasks_at_same_time_gives_three_pairs():
+    owner, mochi, _ = make_owner()
+    for title, kind in [("A", "walk"), ("B", "play"), ("C", "training")]:
+        mochi.add_task(Task(title, kind, 15, preferred_time=parse_time("08:00")))
+
+    assert len(find_conflicts(owner.get_all_tasks())) == 3
+
+
+def test_find_conflicts_ignores_untimed_tasks_and_empty_pets():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Play", "play", 20))
+    mochi.add_task(Task("Feed", "feeding", 10))
+
+    assert Scheduler(owner).find_conflicts() == []
+
+
+# --- Plan edge cases ---
+
+def test_generate_plan_with_no_tasks_is_empty():
+    owner, _, _ = make_owner()
+
+    plan = Scheduler(owner).generate_plan()
+
+    assert plan.scheduled == []
+    assert plan.skipped == []
+    assert plan.total_minutes == 0
+    assert "Scheduled: 0 tasks" in plan.explain()
+
+
+def test_same_time_tasks_are_both_scheduled_without_overlap():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Walk", "walk", 30, preferred_time=parse_time("08:00")))
+    mochi.add_task(Task("Training", "training", 30, preferred_time=parse_time("08:00")))
+
+    plan = Scheduler(owner).generate_plan()
+
+    assert [(s.start_time, s.end_time) for s in plan.scheduled] == [(480, 510), (510, 540)]
+
+
+def test_task_over_time_budget_is_skipped_with_reason():
+    owner, mochi, _ = make_owner()
+    owner.available_minutes = 30
+    mochi.add_task(Task("Walk", "walk", 30))
+    mochi.add_task(Task("Play", "play", 20))
+
+    plan = Scheduler(owner).generate_plan()
+
+    assert [s.task.title for s in plan.scheduled] == ["Walk"]
+    assert [k.task.title for k in plan.skipped] == ["Play"]
+    assert "not enough time" in plan.skipped[0].reason

@@ -72,18 +72,39 @@ Paste a sample of your app's CLI or Streamlit output here so a reader can see wh
 ## 🧪 Testing PawPal+
 
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+# Run the full test suite (after `pip install -r requirements.txt`):
+python -m pytest
 ```
 
-Sample test output:
+### What the tests cover
+
+The suite lives in `tests/test_pawpal.py` and exercises the logic layer in `pawpal_system.py` (22 tests):
+
+| Area | What is verified |
+|------|------------------|
+| Sorting | Tasks come back earliest first; untimed tasks go last; ties keep their original order; midnight (`00:00`) counts as a real time; an empty list works; the input list is not modified |
+| Recurrence | Completing a daily task creates a pending copy due tomorrow and a weekly task one due in 7 days; a one-off task creates nothing; the copy keeps its title, priority, time and frequency but is a new object |
+| Conflict detection | Overlapping windows are flagged across pets and within one pet; identical start times are flagged; three tasks at one time give three warnings; back-to-back, completed and untimed tasks are ignored |
+| Filtering | Tasks can be filtered by pet name and completion status, alone or together |
+| Plan generation | A pet with no tasks gives an empty plan; two tasks at the same time are both scheduled without overlapping; a task over the time budget is skipped with a reason |
+| Basics | `mark_complete`, `add_task` and `parse_time` behave as expected |
+
+### Test results
 
 ```
-# Paste your pytest output here
+============================================= test session starts=============================================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/sujalneupane/Documents/codepath_ai/ai110-module2show-pawpal-starter
+collected 22 items                                                                                            
+
+tests/test_pawpal.py ......................                                                             [100%]
+
+============================================= 22 passed in 0.02s==============================================
 ```
+
+### Confidence Level: ⭐⭐⭐⭐⭐ (5/5)
+
+All 22 tests pass, including the edge cases (empty pets, identical times, midnight, budget overflow). Not yet tested: recurrence across a month or year boundary (it depends on `date.today()`), completing the same recurring task twice, and the Streamlit UI in `app.py`.
 
 ## 📐 Smarter Scheduling
 
