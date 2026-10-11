@@ -1,15 +1,93 @@
 classDiagram
-    %% Replace the placeholders below with your actual classes, attributes, methods, and relationships.
-    %% Keep this file updated so it matches your final implementation.
+    %% PawPal+ draft design. Update this file as the implementation changes.
 
-    class ClassName {
-        +type attribute
-        +method() returnType
+    class Priority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
     }
 
-    class AnotherClass {
-        +type attribute
-        +method() returnType
+    class Owner {
+        +str name
+        +int available_minutes
+        +str day_start
+        +str day_end
+        +List~Pet~ pets
+        +add_pet(pet) None
+        +remove_pet(pet) None
+        +get_all_tasks() List~Task~
     }
 
-    ClassName --> AnotherClass : relationship
+    class Pet {
+        +str name
+        +int age
+        +List~Task~ tasks
+        +species() str
+        +allowed_task_types() List~str~
+        +add_task(task) None
+        +remove_task(task) None
+    }
+
+    class Dog {
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class Cat {
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class OtherPet {
+        +str custom_species
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class Task {
+        +str title
+        +str task_type
+        +int duration_minutes
+        +Priority priority
+        +str preferred_time
+        +bool is_completed
+        +mark_complete() None
+    }
+
+    class ScheduledTask {
+        +Task task
+        +Pet pet
+        +str start_time
+        +str end_time
+        +str reason
+    }
+
+    class DailyPlan {
+        +List~ScheduledTask~ scheduled
+        +List~Task~ skipped
+        +int total_minutes
+        +explain() str
+    }
+
+    class Scheduler {
+        +Owner owner
+        +generate_plan() DailyPlan
+        -sort_tasks(tasks) List~Task~
+        -fits_in_time(task, minutes_left) bool
+        -detect_conflicts(plan) List~Task~
+    }
+
+    Pet <|-- Dog
+    Pet <|-- Cat
+    Pet <|-- OtherPet
+
+    Owner "1" o-- "*" Pet : owns
+    Pet "1" *-- "*" Task : has
+    Task --> Priority : priority
+
+    Scheduler --> Owner : plans for
+    Scheduler ..> DailyPlan : creates
+    DailyPlan "1" *-- "*" ScheduledTask : contains
+    ScheduledTask --> Task
+    ScheduledTask --> Pet
