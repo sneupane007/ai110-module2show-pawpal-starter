@@ -1,5 +1,6 @@
 classDiagram
     %% PawPal+ draft design. Update this file as the implementation changes.
+    %% All times are minutes since midnight (08:00 = 480).
 
     class Priority {
         <<enumeration>>
@@ -11,12 +12,12 @@ classDiagram
     class Owner {
         +str name
         +int available_minutes
-        +str day_start
-        +str day_end
+        +int day_start
+        +int day_end
         +List~Pet~ pets
         +add_pet(pet) None
         +remove_pet(pet) None
-        +get_all_tasks() List~Task~
+        +get_all_tasks() List~Tuple~Pet, Task~~
     }
 
     class Pet {
@@ -50,7 +51,8 @@ classDiagram
         +str task_type
         +int duration_minutes
         +Priority priority
-        +str preferred_time
+        +int preferred_time
+        +str frequency
         +bool is_completed
         +mark_complete() None
     }
@@ -58,24 +60,29 @@ classDiagram
     class ScheduledTask {
         +Task task
         +Pet pet
-        +str start_time
-        +str end_time
+        +int start_time
+        +int end_time
+        +str reason
+    }
+
+    class SkippedTask {
+        +Task task
+        +Pet pet
         +str reason
     }
 
     class DailyPlan {
         +List~ScheduledTask~ scheduled
-        +List~Task~ skipped
+        +List~SkippedTask~ skipped
         +int total_minutes
-        +explain() str
+        +explain(available_minutes) str
     }
 
     class Scheduler {
         +Owner owner
         +generate_plan() DailyPlan
-        -sort_tasks(tasks) List~Task~
-        -fits_in_time(task, minutes_left) bool
-        -detect_conflicts(plan) List~Task~
+        -sort_tasks(pairs) List~Tuple~Pet, Task~~
+        -place_task(task, plan) Tuple~int, int~
     }
 
     Pet <|-- Dog
@@ -89,5 +96,8 @@ classDiagram
     Scheduler --> Owner : plans for
     Scheduler ..> DailyPlan : creates
     DailyPlan "1" *-- "*" ScheduledTask : contains
+    DailyPlan "1" *-- "*" SkippedTask : contains
     ScheduledTask --> Task
     ScheduledTask --> Pet
+    SkippedTask --> Task
+    SkippedTask --> Pet
