@@ -69,30 +69,42 @@ class Pet:
 
 @dataclass
 class Dog(Pet):
+    """A dog, which can also have walks and training."""
+
     def species(self) -> str:
+        """Return "dog"."""
         return "dog"
 
     def allowed_task_types(self) -> List[str]:
+        """Return the common task types plus walk and training."""
         return COMMON_TASK_TYPES + ["walk", "training"]
 
 
 @dataclass
 class Cat(Pet):
+    """A cat, which can also have litter box care."""
+
     def species(self) -> str:
+        """Return "cat"."""
         return "cat"
 
     def allowed_task_types(self) -> List[str]:
+        """Return the common task types plus litter box."""
         return COMMON_TASK_TYPES + ["litter box"]
 
 
 @dataclass
 class OtherPet(Pet):
+    """Any other kind of pet, with an optional custom species name."""
+
     custom_species: str = ""
 
     def species(self) -> str:
+        """Return the custom species name, or "other" if none was given."""
         return self.custom_species or "other"
 
     def allowed_task_types(self) -> List[str]:
+        """Return only the common task types."""
         return list(COMMON_TASK_TYPES)
 
 
@@ -186,6 +198,7 @@ class Scheduler:
     """Builds a DailyPlan for an owner's pets based on time and priority."""
 
     def __init__(self, owner: Owner) -> None:
+        """Create a scheduler for the given owner."""
         self.owner = owner
 
     def generate_plan(self) -> DailyPlan:
