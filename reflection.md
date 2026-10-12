@@ -36,7 +36,9 @@ Yes. After turning the UML into a class skeleton, I reviewed it for missing rela
 **a. Constraints and priorities**
 
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
+The scheduler considers the owner's total available minutes, the day window (08:00 to 20:00 by default), each task's priority, each task's preferred time, whether the task type is valid for the pet's species, and whether the task is already completed.
 - How did you decide which constraints mattered most?
+Hard limits come first: a task is never placed past the time budget or outside the day window, and invalid or completed tasks are skipped. Priority comes next, because a missed medication or feeding costs more than a missed play session. Preferred time is the softest constraint: it decides order among equal priorities and the earliest slot to try, but a task can be moved off it.
 
 **b. Tradeoffs**
 
@@ -66,12 +68,16 @@ A pet owner's day has a handful of tasks, and a plan that always exists and expl
 **a. What you tested**
 
 - What behaviors did you test?
+Sorting (earliest first, untimed last, stable ties, midnight, empty input, input not modified), recurrence (daily +1 day, weekly +7 days, one-off returns nothing, the copy keeps its fields but is a new object), conflict detection (overlap, identical start, back-to-back not flagged, completed and untimed ignored), filtering by pet and status, and plan generation (empty pet, same-time tasks both scheduled without overlap, budget overflow skipped with a reason). 22 tests in `tests/test_pawpal.py`.
 - Why were these tests important?
+Each of these is a place where a quiet bug would give the owner a wrong plan with no error: an off-by-one in the overlap check, a recurring task dated in the past, or a task dropped without a reason.
 
 **b. Confidence**
 
 - How confident are you that your scheduler works correctly?
+Confident in the logic layer: all 22 tests pass. Less confident in `app.py`, which has no automated tests; I checked it by driving the app with Streamlit's `AppTest` (add pet, add conflicting tasks, mark done, generate schedule) and it ran without exceptions.
 - What edge cases would you test next if you had more time?
+Recurrence across a month or year boundary (it depends on `date.today()`), completing the same recurring task twice, a task whose duration is longer than the whole day window, and tasks with identical priority and time to confirm the order stays stable.
 
 ---
 

@@ -1,0 +1,121 @@
+classDiagram
+    %% PawPal+ final design. Matches pawpal_system.py.
+    %% All times are minutes since midnight (08:00 = 480).
+
+    class Priority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
+    }
+
+    class Owner {
+        +str name
+        +int available_minutes
+        +int day_start
+        +int day_end
+        +List~Pet~ pets
+        +add_pet(pet) None
+        +remove_pet(pet) None
+        +get_all_tasks() List~Tuple~Pet, Task~~
+    }
+
+    class Pet {
+        +str name
+        +int age
+        +List~Task~ tasks
+        +species() str
+        +allowed_task_types() List~str~
+        +add_task(task) None
+        +remove_task(task) None
+        +complete_task(task) Task
+    }
+
+    class Dog {
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class Cat {
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class OtherPet {
+        +str custom_species
+        +species() str
+        +allowed_task_types() List~str~
+    }
+
+    class Task {
+        +str title
+        +str task_type
+        +int duration_minutes
+        +Priority priority
+        +int preferred_time
+        +str frequency
+        +bool is_completed
+        +date due_date
+        +mark_complete() Task
+    }
+
+    class ScheduledTask {
+        +Task task
+        +Pet pet
+        +int start_time
+        +int end_time
+        +str reason
+    }
+
+    class SkippedTask {
+        +Task task
+        +Pet pet
+        +str reason
+    }
+
+    class DailyPlan {
+        +List~ScheduledTask~ scheduled
+        +List~SkippedTask~ skipped
+        +int total_minutes
+        +explain(available_minutes) str
+    }
+
+    class Scheduler {
+        +Owner owner
+        +generate_plan() DailyPlan
+        +sort_by_time(pairs) List~Tuple~Pet, Task~~
+        +filter_tasks(pet_name, completed) List~Tuple~Pet, Task~~
+        +find_conflicts() List~str~
+        +mark_task_complete(pet, task) Task
+        -_sort_tasks(pairs) List~Tuple~Pet, Task~~
+        -_place_task(task, plan) Tuple~int, int~
+    }
+
+    class module_functions {
+        <<module pawpal_system>>
+        +format_time(minutes) str
+        +parse_time(text) int
+        +sort_by_time(pairs) List~Tuple~Pet, Task~~
+        +filter_tasks(owner, pet_name, completed) List~Tuple~Pet, Task~~
+        +find_conflicts(pairs) List~str~
+    }
+
+    Pet <|-- Dog
+    Pet <|-- Cat
+    Pet <|-- OtherPet
+
+    Owner "1" o-- "*" Pet : owns
+    Pet "1" *-- "*" Task : has
+    Task --> Priority : priority
+    Task ..> Task : mark_complete() creates next occurrence
+
+    Scheduler --> Owner : plans for
+    Scheduler ..> DailyPlan : creates
+    Scheduler ..> module_functions : delegates sort / filter / conflicts
+    Scheduler ..> Pet : mark_task_complete calls complete_task
+    DailyPlan "1" *-- "*" ScheduledTask : contains
+    DailyPlan "1" *-- "*" SkippedTask : contains
+    ScheduledTask --> Task
+    ScheduledTask --> Pet
+    SkippedTask --> Task
+    SkippedTask --> Pet
