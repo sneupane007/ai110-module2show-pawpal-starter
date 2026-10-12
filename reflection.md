@@ -54,12 +54,16 @@ A pet owner's day has a handful of tasks, and a plan that always exists and expl
 **a. How you used AI**
 
 - How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
+I used the assistant in phases that match the commit history: turning the UML into class skeletons, implementing the scheduling logic and a `main.py` demo, wiring the logic into `app.py`, adding sorting/filtering/conflict detection/recurrence, writing the test suite, and finally reflecting the algorithms in the UI and docs. Reviewing the skeleton for missing relationships and bottlenecks led to most of the design changes listed in 1b. Codebase-aware features were the most effective: reading `pawpal_system.py` and `app.py` together meant UI changes used the real `Scheduler` methods instead of re-implementing them, and running `main.py` and the tests gave real output to paste into the README.
 - What kinds of prompts or questions were most helpful?
+Prompts that named a concrete behavior and its edge cases worked best, for example "two tasks at the same start time" or "back-to-back tasks should not conflict". They produced precise rules and matching tests. Asking for a review of a design for missing relationships and bottlenecks, and asking for 2-3 approaches before any significant change, worked better than asking for a whole feature in one go.
 
 **b. Judgment and verification**
 
 - Describe one moment where you did not accept an AI suggestion as-is.
+The scheduling pass. A single moving time cursor is the simplest way to lay tasks out, but I saw that a high-priority task preferred at midday would push every earlier-preferred task past it. I replaced it with `_place_task`, which scans for the earliest free gap at or after each task's preferred time. In the same spirit I kept `Pet.add_task` strict about allowed task types instead of only filtering the dropdown, and made `Task` compare by identity so `remove_task` cannot delete a look-alike task.
 - How did you evaluate or verify what the AI suggested?
+I turned each concern into a case and ran it: tests for same-time tasks (both scheduled, no overlap), budget overflow (skipped with a reason), and back-to-back tasks (not flagged as conflicts), plus running `main.py` and reading the plan and its "Why" lines. For the UI I drove `app.py` with Streamlit's `AppTest` rather than trusting that it looked right.
 
 ---
 
@@ -86,11 +90,14 @@ Recurrence across a month or year boundary (it depends on `date.today()`), compl
 **a. What went well**
 
 - What part of this project are you most satisfied with?
+That the plan explains itself. Every scheduled task has a reason (priority, at its preferred time, or moved from it), every skipped task has a reason, and conflicts are reported as readable warnings that never crash the app. An owner can see what moved and why.
 
 **b. What you would improve**
 
 - If you had another iteration, what would you improve or redesign?
+Three things. First, `find_conflicts` compares the times the owner asked for, not where the scheduler placed tasks, so a warning can describe a clash the plan already resolved; reporting against the final plan would be clearer. Second, the greedy placement is not optimal, so a high-priority task can block two smaller ones from keeping their preferred times. Third, the app keeps everything in `st.session_state`, so data is lost on refresh, and tasks cannot yet be edited or deleted from the UI.
 
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+Being the lead architect means owning the decisions the AI cannot see: what the system is allowed to do, where each rule lives, and what counts as correct. The assistant is fast at producing code, but the design only stayed clean because I set the boundaries (logic in `pawpal_system.py`, display in `app.py`; conflicts as warnings, not exceptions) and verified each change with tests and real output. Doing the work in separate phases, each ending in a commit, kept each piece small enough to review.
